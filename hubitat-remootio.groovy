@@ -55,36 +55,15 @@ void establishConnection() {
 
 void ping() {
     if (enableLogging) log.debug "ping()"
-    setReceivedPongToFalse()
+    atomicState.receivedPong = false
     sendPing()
     // 30 seconds pong timeout
     runIn(30, checkPong)
 }
 
-void setReceivedPongToFalse() {
-    if (enableLogging) log.debug "setReceivedPongToFalse()"
-    state.elephant = "FALSE STRING"
-
-    if (enableLogging) log.debug "receivedPong set to: ${state.elephant}"
-
-}
-
-void setReceivedPongToTrue() {
-    if (enableLogging) log.debug "setReceivedPongToTrue()"
-    state.elephant = "TRUE STRING"
-
-    if (enableLogging) log.debug "receivedPong set to: ${state.elephant}"
-    
-}
-
-boolean getReceivedPong() {
-    if (enableLogging) log.debug "getReceivedPong(): ${state.elephant}"
-    return state.elephant == "TRUE STRING"
-}
-
 void checkPong() {
     if (enableLogging) log.debug "checkPong()"
-    if (!getReceivedPong()) {
+    if (!atomicState.receivedPong) {
         log.info "Connection lost, reconnecting."
         establishConnection()
     }
@@ -118,7 +97,7 @@ void clearState() {
     state.sessionKey = null
     state.actionId = null
     state.connectionActive = false
-    setReceivedPongToFalse()
+    atomicState.receivedPong = false
 }
 
 void updateState(String state, String description, boolean isStateChange) {
@@ -169,7 +148,7 @@ void parse(String messageJson) {
 
             case "PONG":
                 if (enableLogging) log.debug "Received PONG!"
-                setReceivedPongToTrue()
+                atomicState.receivedPong = true
                 break;
 
             case "CHALLENGE":
