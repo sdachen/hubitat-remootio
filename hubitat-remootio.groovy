@@ -17,7 +17,7 @@ import javax.crypto.Cipher
 import java.util.Random
 
 metadata {
-    definition (name: "Remootio Gate Controller", namespace: "aweather.remootio", author: "Scott Deeann Chen") {
+    definition (name: "Remootio Gate Controller", namespace: "sdachen.remootio", author: "Scott Deeann Chen") {
         capability "GarageDoorControl"
         command "trigger"
     }
@@ -55,14 +55,36 @@ void establishConnection() {
 
 void ping() {
     if (enableLogging) log.debug "ping()"
-    state.receivedPong = false
+    setReceivedPongToFalse()
     sendPing()
     // 30 seconds pong timeout
     runIn(30, checkPong)
 }
 
+void setReceivedPongToFalse() {
+    if (enableLogging) log.debug "setReceivedPongToFalse()"
+    state.elephant = "FALSE STRING"
+
+    if (enableLogging) log.debug "receivedPong set to: ${state.elephant}"
+
+}
+
+void setReceivedPongToTrue() {
+    if (enableLogging) log.debug "setReceivedPongToTrue()"
+    state.elephant = "TRUE STRING"
+
+    if (enableLogging) log.debug "receivedPong set to: ${state.elephant}"
+    
+}
+
+boolean getReceivedPong() {
+    if (enableLogging) log.debug "getReceivedPong(): ${state.elephant}"
+    return state.elephant == "TRUE STRING"
+}
+
 void checkPong() {
-    if (!state.receivedPong) {
+    if (enableLogging) log.debug "checkPong()"
+    if (!getReceivedPong()) {
         log.info "Connection lost, reconnecting."
         establishConnection()
     }
@@ -92,10 +114,11 @@ void trigger() {
 
 // Hubitat device state management methods
 void clearState() {
+    if (enableLogging) log.debug "clearState()"
     state.sessionKey = null
     state.actionId = null
     state.connectionActive = false
-    state.receivedPong = false
+    setReceivedPongToFalse()
 }
 
 void updateState(String state, String description, boolean isStateChange) {
@@ -145,8 +168,8 @@ void parse(String messageJson) {
                 break;
 
             case "PONG":
-                if (enableLogging) "Pong!"
-                state.receivedPong = true
+                if (enableLogging) log.debug "Received PONG!"
+                setReceivedPongToTrue()
                 break;
 
             case "CHALLENGE":
