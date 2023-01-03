@@ -9,7 +9,6 @@ import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import groovy.transform.Field
 
-import java.util.concurrent.ConcurrentHashMap
 import java.util.Random
 
 import javax.crypto.Cipher
@@ -35,7 +34,7 @@ metadata {
     }
 }
 
-@Field static Map sharedState = new java.util.concurrent.ConcurrentHashMap()
+@Field static Map sharedState = new java.util.HashMap()
 
 // Hubitat device methods
 void installed() {
@@ -171,7 +170,7 @@ void parse(String messageJson) {
                 break;
 
             default:
-                if (enableLogging) log.debug "Logic for ${message.type} not implemented."
+                 if (enableLogging) log.debug "Logic for ${message.type} not implemented."
                 break;
         } 
     }
