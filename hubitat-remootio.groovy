@@ -5,21 +5,26 @@
  *
  */ 
 
-import groovy.json.JsonSlurper
 import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import groovy.transform.Field
 
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
-import org.apache.commons.codec.binary.Base64
-import javax.crypto.spec.IvParameterSpec
-import javax.crypto.Cipher
-
+import java.util.concurrent.ConcurrentHashMap
 import java.util.Random
+
+import javax.crypto.Cipher
+import javax.crypto.Mac
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
+
+import org.apache.commons.codec.binary.Base64
 
 metadata {
     definition (name: "Remootio Gate Controller", namespace: "sdachen.remootio", author: "Scott Deeann Chen") {
         capability "GarageDoorControl"
         command "trigger"
+        command "query"
+        attribute "deviceActive", "boolean"
     }
 
     preferences {
@@ -29,6 +34,8 @@ metadata {
         input name: "enableLogging", type: "bool", title: "Enable Debugging Logging"
     }
 }
+
+@Field static Map sharedState = new java.util.concurrent.ConcurrentHashMap()
 
 // Hubitat device methods
 void installed() {
@@ -45,17 +52,17 @@ void updated() {
 // Connection management
 void establishConnection() {
     if (enableLogging) log.debug "establishConnection()"
-    clearState()
     interfaces.webSocket.close()
+    resetState()
     // Do not use the ping provided by webSocket due to Remootio not returning the ping.
-    // Implement our own ping and reconnect mechanism.
-    interfaces.webSocket.connect("ws://${remootioIpAddress}:8080", pingInterval: 86400)
+    // Implement our own ping and reconnect mechanism. This implementation drops the connection every 100 years.
+    interfaces.webSocket.connect("ws://${remootioIpAddress}:8080", pingInterval: 86400*365*100)
     sendAuth()
 }
 
 void ping() {
     if (enableLogging) log.debug "ping()"
-    atomicState.receivedPong = false
+    sharedState["receivedPong"] = false
     sendPing()
     // 30 seconds pong timeout
     runIn(30, checkPong)
@@ -63,7 +70,7 @@ void ping() {
 
 void checkPong() {
     if (enableLogging) log.debug "checkPong()"
-    if (!atomicState.receivedPong) {
+    if (!sharedState["receivedPong"]) {
         log.info "Connection lost, reconnecting."
         establishConnection()
     }
@@ -91,18 +98,23 @@ void trigger() {
     sendTrigger()
 }
 
-// Hubitat device state management methods
-void clearState() {
-    if (enableLogging) log.debug "clearState()"
-    state.sessionKey = null
-    state.actionId = null
-    state.connectionActive = false
-    atomicState.receivedPong = false
+void query() {
+    if (enableLogging) log.debug "query()"
+    sendQuery()
 }
 
-void updateState(String state, String description, boolean isStateChange) {
+// Hubitat device state management methods
+void resetState() {
+    if (enableLogging) log.debug "resetState()"
+    sendEvent(name: "deviceActive", value: false, descriptionText: "Challenge Received", isStateChange: false)
+    sharedState["sessionkey"] = ""
+    sharedState["actionId"] = 0
+    sharedState["receivedPong"] = false
+}
+
+void updateDoorState(String state, String description, boolean isStateChange) {
     // door - ENUM ["unknown", "open", "closing", "closed", "opening"]
-    if (enableLogging) log.debug "updateState(): ${state}, ${description}, ${isStateChange}"
+    if (enableLogging) log.debug "updateDoorState(): ${state}, ${description}, ${isStateChange}"
     switch(state) {
         case "open":
         case "closing":
@@ -117,8 +129,8 @@ void updateState(String state, String description, boolean isStateChange) {
 }
 
 int getNextActionId() {
-    state.actionId = (state.actionId + 1) % 0x7FFFFFFF
-    return state.actionId
+    sharedState["actionId"] = (sharedState["actionId"] + 1) % 0x7FFFFFFF
+    return sharedState["actionId"]
 }
 
 // Websocket incoming data processing methods
@@ -148,14 +160,14 @@ void parse(String messageJson) {
 
             case "PONG":
                 if (enableLogging) log.debug "Received PONG!"
-                atomicState.receivedPong = true
+                sharedState["receivedPong"] = true
                 break;
 
             case "CHALLENGE":
-                state.sessionKey = message.challenge.sessionKey
-                state.actionId = message.challenge.initialActionId
+                sharedState["sessionkey"] = message.challenge.sessionKey
+                sharedState["actionId"] = message.challenge.initialActionId
                 sendQuery()
-                state.connectionActive = true
+                sendEvent(name: "deviceActive", value: true, descriptionText: "Challenge Received", isStateChange: false)
                 break;
 
             default:
@@ -165,11 +177,11 @@ void parse(String messageJson) {
     }
 
     if (message.response) {
-        updateState(message.response.state, "Remootio response to action ${message.response.type}.", false)
+        updateDoorState(message.response.state, "Remootio response to action ${message.response.type}.", false)
     }
 
     if (message.event) {
-        updateState(message.event.state, "Remootio initated update event.", false)
+        updateDoorState(message.event.state, "Remootio initated update event.", false)
     }
 }
 
@@ -225,7 +237,7 @@ void sendPing() {
 
 // Data encryption & decryption methods
 String decrypt(String payload, String iv) {
-    byte[] key = state.sessionKey ? Base64.decodeBase64(state.sessionKey) : hexStringToByteArray(remootioApiSecretKey)
+    byte[] key = sharedState["sessionkey"] ? Base64.decodeBase64(sharedState["sessionkey"]) : hexStringToByteArray(remootioApiSecretKey)
     IvParameterSpec ivParameterSpec = new IvParameterSpec(Base64.decodeBase64(iv))
     SecretKeySpec secretKeySpec = new SecretKeySpec(key, "AES")
 
@@ -244,7 +256,7 @@ String encrypt(String messageJson) {
 
     // Build Cipher
     IvParameterSpec ivParameterSpec = new IvParameterSpec(Base64.decodeBase64(iv));
-    SecretKeySpec secretKeySpec = new SecretKeySpec(Base64.decodeBase64(state.sessionKey), "AES");
+    SecretKeySpec secretKeySpec = new SecretKeySpec(Base64.decodeBase64(sharedState["sessionkey"]), "AES");
     Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING");
     cipher.init(Cipher.ENCRYPT_MODE, secretKeySpec, ivParameterSpec);
 
