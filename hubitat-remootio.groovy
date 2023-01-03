@@ -171,7 +171,7 @@ void parse(String messageJson) {
                 break;
 
             default:
-                 if (enableLogging) log.debug "Logic for ${message.type} not implemented."
+                if (enableLogging) log.debug "Logic for ${message.type} not implemented."
                 break;
         } 
     }
